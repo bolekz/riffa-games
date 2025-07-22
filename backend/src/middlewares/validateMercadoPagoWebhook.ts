@@ -25,6 +25,12 @@ export function validateMercadoPagoWebhook(req: Request, res: Response, next: Ne
       return res.status(401).json(generateResponse(false, 'Assinatura do webhook ausente.'));
     }
 
+    // Validate request body structure before processing
+    if (!req.body || !req.body.data || !req.body.data.id) {
+      logger.warn('[WEBHOOK_VALIDATION] Requisição de webhook com estrutura de corpo inválida.');
+      return res.status(400).json(generateResponse(false, 'Estrutura do webhook inválida.'));
+    }
+
     // Extrai o timestamp (ts) e o hash (v1) do cabeçalho
     const parts = signatureHeader.split(',');
     const timestamp = parts.find(part => part.startsWith('ts='))?.split('=')[1];
@@ -35,8 +41,15 @@ export function validateMercadoPagoWebhook(req: Request, res: Response, next: Ne
       return res.status(401).json(generateResponse(false, 'Assinatura do webhook malformada.'));
     }
 
+    // Validate request-id header exists
+    const requestId = req.get('x-request-id');
+    if (!requestId) {
+      logger.warn('[WEBHOOK_VALIDATION] Cabeçalho x-request-id ausente.');
+      return res.status(400).json(generateResponse(false, 'Cabeçalho x-request-id obrigatório.'));
+    }
+
     // Recria a string assinada conforme a documentação do Mercado Pago
-    const signedTemplate = `id:${req.body.data.id};request-id:${req.get('x-request-id')};ts:${timestamp};`;
+    const signedTemplate = `id:${req.body.data.id};request-id:${requestId};ts:${timestamp};`;
 
     // Gera o hash HMAC usando a chave secreta
     const generatedHash = crypto

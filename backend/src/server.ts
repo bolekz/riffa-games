@@ -58,9 +58,8 @@ function gracefulShutdown(signal: string): void {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-initJobs();
-
 module.exports = { startServer, get server() { return server; } };
+
 initJobs();
 startServer();
 

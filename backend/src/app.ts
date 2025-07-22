@@ -43,12 +43,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser(process.env.COOKIE_SECRET));
 
 // Sessão (necessário para CSRF)
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  throw new Error('SESSION_SECRET environment variable is required but not set');
+}
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'supersecret',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: true,
   cookie: {
-    secure: false, // altere para true em produção com HTTPS
+    secure: process.env.NODE_ENV === 'production', // use secure cookies in production
     httpOnly: true,
     sameSite: 'lax',
   },
