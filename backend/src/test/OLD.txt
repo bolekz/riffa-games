@@ -1,0 +1,81 @@
+import request from 'supertest';
+import app from '../app'; // Caminho para sua instância do Express
+import { generateRandomEmail } from '../utils/testHelpers';
+
+describe('Autenticação - Fluxo Completo', () => {
+  const userData = {
+    name: 'Test User',
+    nickname: `testuser_${Date.now()}`,
+    email: generateRandomEmail(),
+    password: 'SenhaSegura123!',
+  };
+
+  let cookies: string[] = [];
+  let csrfToken: string;
+
+  beforeAll(async () => {
+    const res = await request(app).get('/csrf-token');
+    csrfToken = res.body.csrfToken;
+    cookies = Array.isArray(res.headers['set-cookie'])
+  ? res.headers['set-cookie']
+  : [res.headers['set-cookie']];
+  });
+
+  it('deve registrar um novo usuário', async () => {
+    const res = await request(app)
+      .post('/auth/register')
+      .set('Cookie', cookies.join('; '))
+      .set('x-csrf-token', csrfToken)
+      .send(userData);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('user');
+    expect(res.body.user.email).toBe(userData.email);
+  });
+
+  it('deve autenticar o usuário e retornar cookies', async () => {
+    const res = await request(app)
+      .post('/auth/login')
+      .set('Cookie', cookies.join('; '))
+      .set('x-csrf-token', csrfToken)
+      .send({
+        email: userData.email,
+        password: userData.password,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['set-cookie']).toBeDefined();
+
+    // Atualiza cookies para uso posterior
+    cookies = Array.isArray(res.headers['set-cookie'])
+      ? res.headers['set-cookie']
+      : [res.headers['set-cookie']];
+  });
+
+  it('deve acessar uma rota protegida após login', async () => {
+    const res = await request(app)
+      .get('/auth/me')
+      .set('Cookie', cookies.join('; '));
+
+    expect(res.status).toBe(200);
+    expect(res.body.user).toBeDefined();
+    expect(res.body.user.email).toBe(userData.email);
+  });
+
+  it('deve realizar logout e invalidar a sessão', async () => {
+    // Reobtem CSRF token (sessão já autenticada)
+    const resToken = await request(app)
+      .get('/csrf-token')
+      .set('Cookie', cookies.join('; '));
+
+    const logoutToken = resToken.body.csrfToken;
+
+    const res = await request(app)
+      .post('/auth/logout')
+      .set('Cookie', cookies.join('; '))
+      .set('x-csrf-token', logoutToken);
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Logout realizado com sucesso');
+  });
+});

@@ -1,0 +1,429 @@
+/// Riffa Games - Schema Prisma Atualizado (Versão 3.1)
+/// Implementa a refatoração dos serviços de torneio e a lógica de "vende-tudo-ou-cancela".
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// --- ENUMS ---
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SubscriptionPlan {
+  RECRUTA
+  PRATA
+  OURO
+  GLOBAL
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+}
+
+// O status IN_PROGRESS foi removido, pois a finalização agora é imediata
+// ou o torneio é cancelado. A competição acontece "offline" e o vencedor
+// é determinado quando o torneio finaliza.
+enum TournamentStatus {
+  PENDING_TRANSFER
+  SELLING
+  COMPLETED
+  CANCELED
+}
+
+enum TournamentVisibility {
+  PUBLIC
+  PRIVATE
+  SUBSCRIBERS_ONLY
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  PURCHASE_TICKET
+  SUBSCRIPTION_FEE
+  AFFILIATE_PAYOUT
+  TOURNAMENT_PAYOUT
+  ITEM_VALUE_REIMBURSEMENT
+  REFUND
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum PromotionType {
+  DEPOSIT_BONUS
+  TICKET_DISCOUNT
+}
+
+enum PrizeClaimStatus {
+  PENDING_CLAIM
+  ITEM_CLAIMED
+  CONVERTED_TO_RC
+  RE_RIFFED
+  CASH_OUT_REQUESTED
+}
+
+enum PrizeType {
+  ITEM
+  RIFFACOINS
+  OTHER
+}
+
+enum ScoreOrder {
+  ASC
+  DESC
+}
+
+enum PixKeyType {
+  CPF
+  EMAIL
+  PHONE
+  RANDOM
+}
+
+
+// --- MODELS ---
+
+model User {
+  id                   String    @id @default(cuid())
+  name                 String
+  nickname             String    @unique
+  email                String    @unique
+  password             String
+
+  /// CPF criptografado com AES no nível da aplicação. Nunca armazenado em texto claro.
+  cpf                  String?
+  /// Hash SHA-256 do CPF. Usado para garantir unicidade sem expor o dado original.
+  cpfHash              String?   @unique
+  whatsapp             String?
+  tradeUrl             String?
+
+  steamId              String?   @unique
+  riotId               String?   @unique
+  epicId               String?   @unique
+
+  passwordResetToken   String?   @unique
+  passwordResetExpires DateTime?
+  refreshToken         String?   @unique
+
+  twoFactorAuthCode          String?
+  twoFactorAuthCodeExpiresAt DateTime?
+
+  kycStatus           KycStatus @default(NOT_SUBMITTED)
+  role                Role      @default(USER)
+  riffaCoinsAvailable Int       @default(0)
+  riffaCoinsPending   Int       @default(0)
+  emailVerified       DateTime?
+  lastLoginAt         DateTime?
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  subscription       Subscription?
+  transactions       Transaction[]
+  ownedTournaments   Tournament[]        @relation("TournamentOwner")
+  wonTournaments     Tournament[]        @relation("TournamentWinner")
+  tournamentAttempts TournamentAttempt[] @relation("Competitor")
+  affiliateCode      AffiliateCode?      @relation("AffiliateOwner")
+  referredBy         AffiliateCode?      @relation("ReferredUser", fields: [referredById], references: [id])
+  referredById       String?
+  userEvents         UserEvent[]
+  prizeClaims        PrizeClaim[]
+  notifications      Notification[]
+  leaderboardEntries LeaderboardEntry[]
+
+  financialProfile   FinancialProfile?
+
+  @@index([referredById])
+  @@index([createdAt])
+}
+
+model FinancialProfile {
+  id                String     @id @default(cuid())
+  userId            String     @unique
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  pixKeyType        PixKeyType
+  pixKey            String
+  accountHolderName String
+
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+}
+
+model Subscription {
+  id                    String             @id @default(cuid())
+  userId                String             @unique
+  user                  User               @relation(fields: [userId], references: [id])
+  plan                  SubscriptionPlan   @default(RECRUTA)
+  status                SubscriptionStatus @default(ACTIVE)
+  gatewaySubscriptionId String?            @unique
+  currentPeriodEnds     DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+}
+
+model Game {
+  id            String       @id @default(cuid())
+  name          String       @unique
+  steamAppId    String?      @unique
+  isActive      Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+
+  miniGames     MiniGame[]
+  tournaments   Tournament[]
+  items         Item[]
+  leaderboardEntries LeaderboardEntry[]
+}
+
+model MiniGame {
+  id          String     @id @default(cuid())
+  name        String
+  description String
+  gameId      String
+  game        Game       @relation(fields: [gameId], references: [id])
+  isActive    Boolean    @default(true)
+  scoreOrder  ScoreOrder @default(DESC)
+  minScore    Int?
+  maxScore    Int?
+  createdAt   DateTime   @default(now())
+
+  tournaments Tournament[]
+}
+
+model Tournament {
+  id                  String               @id @default(cuid())
+  name                String
+  status              TournamentStatus     @default(SELLING)
+  visibility          TournamentVisibility @default(PUBLIC)
+  pricePerTicket      Int                  // Renomeado de entryFee para clareza
+  maxAttemptsPerUser  Int                  // Renomeado de maxAttempts para clareza
+  
+  // Lógica de "vende-tudo-ou-cancela"
+  ticketTarget        Int                  // Renomeado de maxParticipants. É a meta de tickets.
+  ticketsSold         Int                  @default(0) // NOVO: Contador de tickets vendidos.
+
+  sellingEndsAt       DateTime
+  competitionStartsAt DateTime
+  competitionEndsAt   DateTime
+
+  publishAt           DateTime?
+  
+  owner               User?                 @relation("TournamentOwner", fields: [ownerId], references: [id])            
+  ownerId             String?              
+  winnerId            String?
+  winner              User?                @relation("TournamentWinner", fields: [winnerId], references: [id])
+  gameId              String
+  game                Game                 @relation(fields: [gameId], references: [id])
+  miniGameId          String
+  miniGame            MiniGame             @relation(fields: [miniGameId], references: [id])
+
+  attempts            TournamentAttempt[]
+  prizes              TournamentPrize[]
+
+  financialSnapshot   Json?
+
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([status, gameId])
+  @@index([winnerId])
+}
+
+model Item {
+  id             String            @id @default(cuid())
+  name           String            @unique
+  description    String?
+  imageUrl       String
+  marketValueBRL Decimal
+
+  gameId         String
+  game           Game              @relation(fields: [gameId], references: [id])
+
+  prizeIn        TournamentPrize[]
+
+  createdAt      DateTime          @default(now())
+}
+
+model TournamentPrize {
+  id            String       @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament   @relation(fields: [tournamentId], references: [id])
+  rank          Int          @default(1)
+
+  type          PrizeType    @default(ITEM)
+  itemId        String?
+  item          Item?        @relation(fields: [itemId], references: [id])
+  rcAmount      Int?
+  description   String?
+
+  claims        PrizeClaim[]
+
+  @@unique([tournamentId, rank])
+}
+
+model TournamentAttempt {
+  id            String      @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  competitorId  String
+  competitor    User        @relation("Competitor", fields: [competitorId], references: [id], onDelete: Cascade)
+
+  score         Int?
+  
+  // Armazena o valor pago, para o caso de reembolso em promoções.
+  amountPaidInRC Int
+
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+
+  createdAt     DateTime    @default(now())
+
+  @@index([tournamentId])
+  @@index([competitorId, tournamentId])
+}
+
+model Transaction {
+  @@index([userId])
+  id                   String            @id @default(cuid())
+  userId               String
+  user                 User              @relation(fields: [userId], references: [id])
+  type                 TransactionType
+  status               TransactionStatus @default(PENDING)
+  amountBrl            Decimal?
+  amountRc             Int?
+  gatewayTransactionId String?           @unique
+  details              Json?
+
+  createdAt            DateTime          @default(now())
+
+  tournamentAttempts   TournamentAttempt[]
+  affiliateEarning     AffiliateEarning?
+
+  @@index([createdAt])
+  @@index([type, status])
+}
+
+model AffiliateCode {
+  id             String             @id @default(cuid())
+  code           String             @unique
+  ownerId        String             @unique
+  owner          User               @relation("AffiliateOwner", fields: [ownerId], references: [id])
+  commissionRate Decimal            @default(0)
+
+  referredUsers  User[]             @relation("ReferredUser")
+  earnings       AffiliateEarning[]
+
+  createdAt      DateTime           @default(now())
+}
+
+model Promotion {
+  id                 String        @id @default(cuid())
+  code               String        @unique
+  description        String
+  type               PromotionType
+  discountPercentage Decimal?
+  rcAmount           Int?
+  validUntil         DateTime
+  maxUses            Int?
+  currentUses        Int           @default(0)
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+}
+
+model UserEvent {
+  @@index([userId])
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  eventType String
+  payload   Json
+  createdAt DateTime @default(now())
+}
+
+model PrizeClaim {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id])
+  tournamentPrizeId String
+  tournamentPrize   TournamentPrize  @relation(fields: [tournamentPrizeId], references: [id])
+  status            PrizeClaimStatus @default(PENDING_CLAIM)
+  claimedAt         DateTime?
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @default(now()) @updatedAt
+
+  @@unique([userId, tournamentPrizeId])
+}
+
+model AffiliateEarning {
+  id                String      @id @default(cuid())
+  affiliateCodeId   String
+  affiliateCode     AffiliateCode @relation(fields: [affiliateCodeId], references: [id])
+  originatingUserId String
+  transactionId     String      @unique
+  transaction       Transaction @relation(fields: [transactionId], references: [id])
+  commissionAmount  Int
+  createdAt         DateTime    @default(now())
+
+  @@index([affiliateCodeId])
+  @@index([originatingUserId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  url       String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
+
+model PlatformSetting {
+  key         String   @id
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+model LeaderboardEntry {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameId    String?
+  game      Game?    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  /// Formato padronizado esperado: "YYYY-MM" para períodos mensais.
+  period    String
+  score     Int
+  rank      Int
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, period, gameId])
+  @@index([period, score])
+  @@index([gameId, period, score])
+}

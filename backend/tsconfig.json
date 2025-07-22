@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "lib": ["ES2020"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "types": ["node", "jest"],
+    "noImplicitAny": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src", "src/test", "ARQUIVOS/tournament.controller.test.ts", "ARQUIVOS/tournament.service.test.ts", "ARQUIVOS/tournamentFinalizer.test.ts", "ARQUIVOS/validateRequest.test.ts", "ARQUIVOS/webhook.service.test.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "PrizeClaimStatus" ADD VALUE 'CASH_OUT_REQUESTED';
