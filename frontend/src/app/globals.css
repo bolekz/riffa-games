@@ -1,0 +1,34 @@
+/* --- DIRETIVAS TAILWIND (A BASE DE TUDO) --- */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Rajdhani:wght@700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- ESTILOS GLOBAIS COM DESIGN SYSTEM RIFFA GAMES --- */
+@layer base {
+  /* Aplica o tema escuro e fonte padrão em todo o HTML */
+  html {
+    @apply bg-bg-dark text-text-primary font-sans;
+  }
+
+  /* Garante altura mínima, zera margens e padding no body */
+  body {
+    @apply min-h-screen m-0 p-0;
+  }
+
+  /* Define tipografia básica */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display;
+  }
+
+  /* Links com efeito neon sutil */
+  a {
+    @apply text-tron-cyan hover:shadow-glow-cyan transition-shadow;
+  }
+
+  /* Inputs e botões ganham contraste */
+  input, button, select, textarea {
+    @apply bg-gray-800 border border-gray-700 text-text-primary focus:outline-none focus:ring-2 focus:ring-tron-cyan;
+  }
+}
